@@ -108,7 +108,8 @@ del X, y
 X_train = pd_X_train.values
 
 
-del pd_X_train,
+del pd_X_train
+# Some coments, nevermind
 
 
 def train_several_models():
