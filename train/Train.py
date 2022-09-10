@@ -1,3 +1,4 @@
+from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, mean_squared_error
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
@@ -6,6 +7,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import metrics
 import os
+
 
 PATH = "models"
 EPOCHS = 50
@@ -46,16 +48,16 @@ class DeepModel(tf.keras.models.Sequential):
             neurons_output_layer, activation='linear'))
 
         if (loss_func == 'mean_absolute_error'):
-            self.compile(optimizer='Adam',
+            self.compile(optimizer='sgd',
                          loss='mean_absolute_error', metrics=metrics)
 
         elif (loss_func == 'mean_squared_error'):
-            self.compile(optimizer='Adam',
+            self.compile(optimizer='sgd',
                          loss='mean_squared_error', metrics=metrics)
 
         elif (loss_func == 'mean_squared_logarithmic_error'):
             self.compile(
-                optimizer='Adam', loss='mean_squared_logarithmic_error', metrics=metrics)
+                optimizer='sgd', loss='mean_squared_logarithmic_error', metrics=metrics)
 
 
 def get_data(path: str):
@@ -79,7 +81,7 @@ def get_data(path: str):
     df = df.drop(['install_date'], axis=1)
 
     Y = df[['target_sub_ltv_day30', 'target_iap_ltv_day30',
-            'target_ad_ltv_day30']]
+            'target_ad_ltv_day30', 'target_full_ltv_day30']]
 
     df.drop(['target_sub_ltv_day30', 'target_iap_ltv_day30',
             'target_ad_ltv_day30', 'target_full_ltv_day30'], axis=1, inplace=True)
@@ -107,7 +109,6 @@ del X, y
 
 X_train = pd_X_train.values
 
-
 del pd_X_train
 # Some coments, nevermind
 
@@ -123,9 +124,16 @@ def train_several_models():
                         str(n_hidden_layers) + \
                         ("_dropout_" if (dropout) else "_nodropout_") + target
 
-                    os.mkdir(PATH + '/' + cur_model_folder)
+                    try:
+                        os.mkdir(PATH + '/' + cur_model_folder)
 
-                    print(cur_model_folder)
+                        print("Training:", cur_model_folder)
+
+                    except:
+                        print(cur_model_folder, "alrady exist, skipping...")
+                        continue
+                    stopping = tf.keras.callbacks.EarlyStopping(
+                        monitor="var_loss", patience=3)
 
                     model = DeepModel(loss_func=loss_function,
                                       number_of_hidden_layers=n_hidden_layers,
@@ -137,7 +145,8 @@ def train_several_models():
                     del single_y_train
 
                     history = model.fit(
-                        X_train, singl_y_train_values, verbose=1, epochs=EPOCHS, validation_data=(pd_X_test, pd_y_test[target]))
+                        X_train, singl_y_train_values, verbose=1, epochs=EPOCHS,
+                        validation_data=(pd_X_test, pd_y_test[target]), callbacks=[stopping])
 
                     log_folder = PATH + '/' + cur_model_folder + "/logs"
                     os.mkdir(log_folder)
