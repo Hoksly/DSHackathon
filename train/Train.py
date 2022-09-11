@@ -8,11 +8,12 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras import metrics
+from tensorflow.keras.models import load_model
 import os
 
 
 PATH = "models"
-TOTAL_EPOCHS = 6
+TOTAL_EPOCHS = 3
 
 try:
     os.mkdir(PATH)
@@ -27,7 +28,7 @@ class DeepModel(tf.keras.models.Sequential):
                  n_input_layer=305,
                  number_of_hidden_layers=5,
                  neurons_hidden_layer=305,
-                 neurons_output_layer=4,
+                 neurons_output_layer=1,
                  dropout=True,
                  dropout_rate=0.2,
                  metrics=[
@@ -38,6 +39,8 @@ class DeepModel(tf.keras.models.Sequential):
 
         super(DeepModel, self).__init__(*args, **kwargs)
 
+        self.add(Dense(n_input_layer, activation='linear'))
+
         for i in range(1, number_of_hidden_layers+1):
 
             self.add(Dense(
@@ -47,7 +50,7 @@ class DeepModel(tf.keras.models.Sequential):
                 self.add(Dropout(dropout_rate))
 
         self.add(Dense(
-            neurons_output_layer, activation='linear'))
+            neurons_output_layer, activation='softplus'))
 
         if (loss_func == 'mean_absolute_error'):
             self.compile(optimizer='Adam',
@@ -71,20 +74,32 @@ def save_model(model: DeepModel, history, path):
 
 
 class MasterModel:
-    def __init__(self, model_sub: DeepModel, model_iap: DeepModel, model_ad: DeepModel) -> None:
+    def __init__(self, inp_layer: int, out_layer: int):
+        self.model_sub = DeepModel(
+            n_input_layer=inp_layer, neurons_output_layer=out_layer)
+        self.model_iap = DeepModel(
+            n_input_layer=inp_layer, neurons_output_layer=out_layer)
+        self.model_ad = DeepModel(
+            n_input_layer=inp_layer, neurons_output_layer=out_layer)
+
+    """ def __init__(self, model_sub: DeepModel, model_iap: DeepModel, model_ad: DeepModel) -> None:
         self.model_sub = model_sub
         self.model_iap = model_iap
         self.model_ad = model_ad
 
-    def __init__(self):
-        self.model_sub = DeepModel()
-        self.model_iap = DeepModel()
-        self.model_ad = DeepModel()
+    def __init__(self, folder: str):
+        self.model_sub = DeepModel(folder + '/model_sub/model')
+        self.model_iap = DeepModel(folder + '/model_iap/model')
+        self.model_ad = load_model(folder + '/model_ad/model')"""
 
     def predict(self, X: np.ndarray):
         sub_prediction = self.model_sub.predict(X)
         iap_prediction = self.model_iap.predict(X)
         ad_prediction = self.model_ad.predict(X)
+        print(ad_prediction.shape)
+        print(ad_prediction.shape)
+        print(ad_prediction.shape)
+
         return sub_prediction + iap_prediction + ad_prediction
 
     def fit(self, X_train, y_train, save_folder, verbose, epochs,
@@ -92,21 +107,22 @@ class MasterModel:
 
         print("-"*30)
         print("Training sub model")
+        print(y_train[0].shape, y_train[1].shape, y_train[2].shape)
         print("-"*30)
         history_sub = self.model_sub.fit(X_train, y_train[0], verbose=verbose, epochs=epochs,
-                                         callbacks=callbacks)
+                                         callbacks=callbacks, validation_batch_size=0.001)
 
         print("-"*30)
         print("Training iap model")
         print("-"*30)
         history_iap = self.model_iap.fit(X_train, y_train[1], verbose=verbose, epochs=epochs,
-                                         callbacks=callbacks)
+                                         callbacks=callbacks, validation_batch_size=0.001)
 
         print("-"*30)
         print("Training ad model")
         print("-"*30)
         history_ad = self.model_ad.fit(X_train, y_train[2], verbose=verbose, epochs=epochs,
-                                       callbacks=callbacks)
+                                       callbacks=callbacks, validation_batch_size=0.001)
         os.mkdir(save_folder)
 
         save_model(self.model_ad, history_ad, save_folder + '/model_ad')
@@ -167,7 +183,7 @@ def train_several_models():
                         print(cur_model_folder, "alrady exist, skipping...")
                         continue
                     stopping = tf.keras.callbacks.EarlyStopping(
-                        monitor="var_loss", patience=3)
+                        monitor="val_loss", patience=3)
 
                     model = DeepModel(loss_func=loss_function,
                                       number_of_hidden_layers=n_hidden_layers,
@@ -179,7 +195,7 @@ def train_several_models():
                     del single_y_train
 
                     history = model.fit(
-                        X_train, singl_y_train_values, verbose=1, epochs=EPOCHS,
+                        X_train, singl_y_train_values, verbose=1, epochs=4,
                         validation_data=(pd_X_test, pd_y_test[target]), callbacks=[stopping])
 
                     log_folder = PATH + '/' + cur_model_folder + "/logs"
@@ -199,31 +215,30 @@ def train_several_models():
 
 
 def train_master():
-    Master = MasterModel()
+    Master = MasterModel(inp_layer=X_train.shape[1], out_layer=1)
     os.mkdir("Masters")
 
     for epochs in range(TOTAL_EPOCHS):
         stopping = tf.keras.callbacks.EarlyStopping(
-            monitor="var_loss", patience=3)
+            monitor="val_loss", patience=3)
 
-        Master.fit(X_train, (y_sub_train, y_iap_train, y_ad_train), "Masters/Master" + str(epochs*10 + 10), verbose=1, epochs=10,
-                   validation_data=(pd_X_test, pd_y_test), callbacks=[stopping])
+        Master.fit(X_train, (y_sub_train, y_iap_train, y_ad_train), "Masters/Master" + str(epochs*10 + 10), verbose=1, epochs=4,
+                   validation_data=(pd_X_test, (y_sub_test, y_iap_test, y_ad_test)), callbacks=[stopping])
 
 
 def train_main():
     model = DeepModel()
 
     os.mkdir("MonoModel")
-    targets = pd_y_train["target_full_ltv_day30"].values
 
     for i in range(TOTAL_EPOCHS):
 
         stopping = tf.keras.callbacks.EarlyStopping(
-            monitor="var_loss", patience=3)
+            monitor="val_loss", patience=3)
 
         history = model.fit(
-            X_train, targets, verbose=1, epochs=10,
-            validation_data=(pd_X_test, pd_y_test["target_full_ltv_day30"]), callbacks=[stopping])
+            X_train, y_full_train, verbose=1, epochs=1,
+            validation_data=(pd_X_test, y_full_test), callbacks=[stopping])
 
         save_model(model, history, "MonoModel/model" + str(i*10 + 10))
 
@@ -242,9 +257,17 @@ y_ad_train = pd_y_train['target_ad_ltv_day30'].values
 y_full_train = pd_y_train['target_full_ltv_day30'].values
 
 
+y_sub_test = pd_y_test['target_sub_ltv_day30'].values
+y_iap_test = pd_y_test['target_iap_ltv_day30'].values
+y_ad_test = pd_y_test['target_ad_ltv_day30'].values
+y_full_test = pd_y_test['target_full_ltv_day30'].values
+
 del pd_X_train, pd_y_train
 # Some coments, nevermind
+x = 0
+for el in y_full_train:
+    if el == 0:
+        x += 1
 
-
-train_master()
-train_main()
+print(y_full_train.shape)
+print(x)
